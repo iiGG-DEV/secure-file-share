@@ -6,7 +6,9 @@ time and by download count. Optionally protect a file with a **password** - then
 wrapped with a key derived from that password via **Argon2id**, so *not even the server* can
 read it without the password. Expired shares are cleaned up automatically.
 
-Ships with a small **web UI** (upload form + download page, EN/PL/DE) on top of a clean REST API.
+Ships with a small **web UI** (EN/PL/DE) on top of a clean REST API: an upload form with a live
+progress bar and a **QR code** for the link, and a download page with an **expiry countdown** and
+password prompt.
 
 Built to demonstrate practical backend security: authenticated encryption, envelope
 encryption, memory-hard password KDF, hashed secret tokens, TTL/quota expiry, constant-time
@@ -88,15 +90,20 @@ Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `d
 - **Upload authentication.** Uploads require a valid `X-Api-Key` header, compared in **constant
   time** (`MessageDigest.isEqual`). Downloads are anonymous - the token is the credential; the
   download password (if any) travels in the `X-Download-Password` header, never in the URL.
+- **Password attempt throttling.** Wrong-password attempts are counted per link; after
+  `sfs.max-password-attempts` the link is locked for `sfs.password-lockout-minutes` and returns
+  `429` with a `Retry-After` header. Combined with Argon2id, this makes online guessing impractical.
+- **Security headers.** Every response carries `Content-Security-Policy`, `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, `Permissions-Policy`,
+  and `Strict-Transport-Security` over HTTPS (see `SecurityHeadersFilter`).
 - **Hardening.** Upload size capped; on-disk filenames are UUIDs under a fixed root (no path
   traversal); client filenames are sanitised; secrets are never logged; `storage/` and `.env`
   are git-ignored.
 
-> **Threat-model notes / not-yet-done:** **no rate limiting on password attempts** - a memory-hard
-> KDF slows each guess but an online limiter is still the right defence for weak passwords;
-> whole files are buffered in memory (bounded by the upload cap, not streamed); the master key is
-> a single static key (no rotation); prod should serve over **HTTPS** and use DB migrations
-> (e.g. Flyway) instead of `ddl-auto`.
+> **Threat-model notes / not-yet-done:** whole files are buffered in memory (bounded by the
+> upload cap, not streamed); the master key is a single static key (no rotation); the browser UI
+> is server-trusting (a **client-side E2E encryption** mode is the planned next step); prod
+> should serve over **HTTPS** and use DB migrations (e.g. Flyway) instead of `ddl-auto`.
 
 ## Running it
 
@@ -175,6 +182,8 @@ Responses: `200` file stream · `401` password required (or bad API key on uploa
 | `sfs.default-max-downloads` | `5`         | default download limit |
 | `sfs.cleanup-interval-ms`   | `300000`    | cleanup job interval |
 | `sfs.public-base-url`       | (empty)     | base URL for links; else derived from the request |
+| `sfs.max-password-attempts` | `5`         | wrong-password tries before a link is locked |
+| `sfs.password-lockout-minutes` | `15`     | how long a link stays locked after too many tries |
 
 Argon2id parameters live in `KeyService` (OWASP baseline) and are recorded per share.
 
