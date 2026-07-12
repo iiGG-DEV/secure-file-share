@@ -2,7 +2,7 @@
 
 A small Spring Boot service for sharing files securely. You upload a file, the server
 **encrypts it with AES-256-GCM**, and hands back a **one-time-ish link** that **expires** by
-time and by download count. Optionally protect a file with a **password** — then the file is
+time and by download count. Optionally protect a file with a **password** - then the file is
 wrapped with a key derived from that password via **Argon2id**, so *not even the server* can
 read it without the password. Expired shares are cleaned up automatically.
 
@@ -26,12 +26,12 @@ the DEK is then *wrapped* (encrypted) with either the server master key or a pas
 ```
 POST /api/files ──► ApiKeyFilter ──► FileController ──► FileShareService
    (multipart)        (X-Api-Key)                          │
-                                                            ├─ EncryptionService  (AES-256-GCM)
-                                                            ├─ KeyService         (random DEK · Argon2id from password)
-                                                            ├─ FileStorageService (ciphertext ─► disk, UUID name)
-                                                            ├─ TokenService       (256-bit token, SHA-256 hash)
-                                                            └─ StoredFileRepository (metadata + wrapped DEK ─► DB)
-                                                            ▼
+                                                           ├─ EncryptionService  (AES-256-GCM)
+                                                           ├─ KeyService         (random DEK · Argon2id from password)
+                                                           ├─ FileStorageService (ciphertext ─► disk, UUID name)
+                                                           ├─ TokenService       (256-bit token, SHA-256 hash)
+                                                           └─ StoredFileRepository (metadata + wrapped DEK ─► DB)
+                                                           ▼
                                           { downloadUrl, token, expiresAt, maxDownloads, passwordProtected }
 
 GET /api/files/{token}/meta ─► filename, passwordProtected, expiresAt, downloadsRemaining  (does NOT consume)
@@ -64,7 +64,7 @@ Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `d
 ## Security model
 
 - **Encryption at rest (envelope).** Each file is encrypted with a **fresh random per-file DEK**
-  using **AES-256-GCM** — an AEAD cipher that provides confidentiality *and* integrity, so a
+  using **AES-256-GCM** - an AEAD cipher that provides confidentiality *and* integrity, so a
   tampered ciphertext (or a wrong key) fails to decrypt rather than returning garbage. Each
   encryption uses a fresh random 12-byte IV.
 - **Key wrapping.** The DEK is never stored in the clear. It is encrypted with:
@@ -86,13 +86,13 @@ Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `d
   **or** once `downloadCount` reaches `maxDownloads`. The check + increment run under a row lock,
   atomic across concurrent downloads. A `@Scheduled` job purges expired rows and their blobs.
 - **Upload authentication.** Uploads require a valid `X-Api-Key` header, compared in **constant
-  time** (`MessageDigest.isEqual`). Downloads are anonymous — the token is the credential; the
+  time** (`MessageDigest.isEqual`). Downloads are anonymous - the token is the credential; the
   download password (if any) travels in the `X-Download-Password` header, never in the URL.
 - **Hardening.** Upload size capped; on-disk filenames are UUIDs under a fixed root (no path
   traversal); client filenames are sanitised; secrets are never logged; `storage/` and `.env`
   are git-ignored.
 
-> **Threat-model notes / not-yet-done:** **no rate limiting on password attempts** — a memory-hard
+> **Threat-model notes / not-yet-done:** **no rate limiting on password attempts** - a memory-hard
 > KDF slows each guess but an online limiter is still the right defence for weak passwords;
 > whole files are buffered in memory (bounded by the upload cap, not streamed); the master key is
 > a single static key (no rotation); prod should serve over **HTTPS** and use DB migrations
@@ -112,7 +112,7 @@ export SFS_API_KEY=dev-api-key
 
 Open **http://localhost:8080/** for the web UI (upload form; pick a language top-right). The
 generated link opens a **download page** that prompts for the password when needed. Dev has
-insecure fallback secrets baked into `application.yml` so it starts even without the env vars —
+insecure fallback secrets baked into `application.yml` so it starts even without the env vars -
 **do not rely on those outside dev.** The H2 console (dev only) is at `/h2-console`.
 
 PowerShell equivalent for the key:
@@ -131,7 +131,7 @@ Set `SPRING_PROFILES_ACTIVE=prod` and provide every secret via the environment
 
 ## API
 
-### Upload — `POST /api/files`
+### Upload - `POST /api/files`
 Headers: `X-Api-Key: <key>` · Body: `multipart/form-data`
 
 | Field          | Type | Required | Notes |
@@ -148,11 +148,11 @@ curl -sS -H "X-Api-Key: dev-api-key" \
 # → 201 { "downloadUrl": "...", "token": "...", "expiresAt": "...", "maxDownloads": 3, "passwordProtected": true }
 ```
 
-### Metadata — `GET /api/files/{token}/meta`
+### Metadata - `GET /api/files/{token}/meta`
 Non-consuming; lets a client know whether a password is required before downloading.
 Returns `{ filename, passwordProtected, expiresAt, downloadsRemaining }`.
 
-### Download — `GET /api/files/{token}`
+### Download - `GET /api/files/{token}`
 No API key; the token is the credential. For protected shares, send the password in the
 `X-Download-Password` header.
 
