@@ -57,11 +57,11 @@ Package layout (`com.securefileshare`):
 
 | Package     | Responsibility |
 |-------------|----------------|
-| `config`    | `SecurityProperties` (typed `sfs.*` config), `ApiKeyFilter` (upload auth) |
+| `config`    | `SecurityProperties`, `ApiKeyFilter` (upload/revoke auth), `SecurityHeadersFilter`, `OpenApiConfig` |
 | `web`       | `FileController`, `GlobalExceptionHandler`, `dto/UploadResponse` |
-| `service`   | `EncryptionService`, `KeyService`, `TokenService`, `FileStorageService`, `FileShareService`, `CleanupService` |
+| `service`   | `EncryptionService`, `KeyService`, `TokenService`, `FileStorageService`, `FileShareService`, `CleanupService`, `DownloadAttemptLimiter` |
 | `domain`    | `StoredFile` entity + `StoredFileRepository` |
-| `exception` | `ShareNotFound` (404), `ShareExpired` (410), `PasswordRequired` (401), `InvalidPassword` (403) |
+| `exception` | `ShareNotFound` (404), `ShareExpired` (410), `PasswordRequired` (401), `InvalidPassword` (403), `TooManyAttempts` (429) |
 
 Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `download.html`
 (prompts for a password when the share is protected). Both are localized EN/PL/DE.
@@ -127,10 +127,12 @@ export SFS_API_KEY=dev-api-key
 ./mvnw spring-boot:run
 ```
 
-Open **http://localhost:8080/** for the web UI (upload form; pick a language top-right). The
-generated link opens a **download page** that prompts for the password when needed. Dev has
+Open **http://localhost:8080/** for the web UI: drag-and-drop upload, live progress bar, QR code,
+language switch (EN/PL/DE) and a light/dark theme toggle. The generated link opens a **download
+page** with an expiry countdown that prompts for the password / decrypts E2E as needed. Dev has
 insecure fallback secrets baked into `application.yml` so it starts even without the env vars -
-**do not rely on those outside dev.** The H2 console (dev only) is at `/h2-console`.
+**do not rely on those outside dev.** Dev-only helpers: H2 console at `/h2-console`, Swagger UI at
+`/swagger-ui.html`, health at `/actuator/health`.
 
 PowerShell equivalent for the key:
 ```powershell
@@ -144,7 +146,9 @@ $env:SFS_API_KEY = "dev-api-key"
 
 Set `SPRING_PROFILES_ACTIVE=prod` and provide every secret via the environment
 (`SFS_ENCRYPTION_KEY`, `SFS_API_KEY`, `SFS_STORAGE_DIR`, `SFS_DB_URL`, `SFS_DB_USER`,
-`SFS_DB_PASSWORD`). See `.env.example`.
+`SFS_DB_PASSWORD`). See `.env.example`. In prod the schema is created by **Flyway**
+(`db/migration/V1__init.sql`) and Hibernate only validates it. Dev/test run on H2 with Hibernate
+schema generation, so the migration should be verified against a real PostgreSQL before deploying.
 
 ## API
 
@@ -167,8 +171,16 @@ curl -sS -H "X-Api-Key: dev-api-key" \
 ```
 
 ### Metadata - `GET /api/files/{token}/meta`
-Non-consuming; lets a client know whether a password is required before downloading.
-Returns `{ filename, passwordProtected, expiresAt, downloadsRemaining }`.
+Non-consuming; lets a client know whether a password/E2E applies before downloading.
+Returns `{ filename, passwordProtected, e2e, expiresAt, downloadsRemaining }`.
+
+### Revoke — `DELETE /api/files/{token}`
+Uploader-only (requires `X-Api-Key`). Permanently deletes the blob + metadata → `204`, or `404`
+if unknown. **Burn after reading** = upload with `maxDownloads=1`; the share is deleted the instant
+its single download completes (not left for the cleanup job).
+
+Interactive API docs: **Swagger UI at `/swagger-ui.html`** (OpenAPI JSON at `/v3/api-docs`).
+Health probe: **`/actuator/health`**.
 
 ### Download - `GET /api/files/{token}`
 No API key; the token is the credential. For protected shares, send the password in the
