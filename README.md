@@ -4,7 +4,10 @@ A small Spring Boot service for sharing files securely. You upload a file, the s
 **encrypts it with AES-256-GCM**, and hands back a **one-time-ish link** that **expires** by
 time and by download count. Optionally protect a file with a **password** - then the file is
 wrapped with a key derived from that password via **Argon2id**, so *not even the server* can
-read it without the password. Expired shares are cleaned up automatically.
+read it without the password. Or turn on **end-to-end encryption**: the browser encrypts the
+file (and its name) with **WebCrypto** before upload and puts the key in the link's
+`#fragment` - which browsers never send to the server - so the server only ever stores an
+opaque blob. Expired shares are cleaned up automatically.
 
 Ships with a small **web UI** (EN/PL/DE) on top of a clean REST API: an upload form with a live
 progress bar and a **QR code** for the link, and a download page with an **expiry countdown** and
@@ -77,6 +80,13 @@ Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `d
   with the Argon2id-derived key. The server keeps no other copy, so **the server cannot decrypt
   the file without the password**. A wrong password makes the DEK unwrap fail (GCM auth) → `403`;
   it does **not** consume a download.
+- **End-to-end encryption (browser).** With E2E on, the browser encrypts the file *and its
+  filename* with a random AES-256-GCM key via WebCrypto **before** upload, and uploads only the
+  opaque `[IV][ciphertext]` blob. The key is placed in the link's URL **`#fragment`**, which
+  browsers never transmit - so the server (and its logs, and this codebase) never sees the key,
+  the plaintext, or even the real filename. The blob is still wrapped with the master key at rest
+  (defence in depth). E2E and the server-side password are mutually exclusive (the fragment key is
+  the secret). Requires a secure context (HTTPS or localhost).
 - **Argon2id KDF.** Memory-hard (OWASP baseline: 19 MiB, t=2, p=1), which resists GPU/ASIC
   brute-force far better than a plain PBKDF2. The algorithm + parameters are stored per share as
   a self-describing spec (e.g. `argon2id$v=19,m=19456,t=2,p=1`), so parameters can be raised over
@@ -101,9 +111,9 @@ Static web UI lives in `src/main/resources/static`: `index.html` (upload) and `d
   are git-ignored.
 
 > **Threat-model notes / not-yet-done:** whole files are buffered in memory (bounded by the
-> upload cap, not streamed); the master key is a single static key (no rotation); the browser UI
-> is server-trusting (a **client-side E2E encryption** mode is the planned next step); prod
-> should serve over **HTTPS** and use DB migrations (e.g. Flyway) instead of `ddl-auto`.
+> upload cap, not streamed); the master key is a single static key (no rotation); prod should
+> serve over **HTTPS** (also required for browser E2E outside localhost) and use DB migrations
+> (e.g. Flyway) instead of `ddl-auto`.
 
 ## Running it
 
@@ -147,6 +157,7 @@ Headers: `X-Api-Key: <key>` · Body: `multipart/form-data`
 | `ttlHours`     | int  | no       | link lifetime; default 24, capped at `sfs.max-ttl-hours` |
 | `maxDownloads` | int  | no       | download limit; default `sfs.default-max-downloads` |
 | `password`     | text | no       | if set, enables Argon2id zero-knowledge protection |
+| `e2e`          | bool | no       | mark the upload as already client-encrypted (browser E2E); disables server-side password |
 
 ```bash
 curl -sS -H "X-Api-Key: dev-api-key" \
